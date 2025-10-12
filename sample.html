@@ -1,0 +1,761 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Bank Statement Insights — Corrected</title>
+
+<!-- CDN: pdf.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.9.179/pdf.min.js"></script>
+<!-- CDN: Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+  :root{
+    --bg:#0f1724; --card:#0b1220; --muted:#9aa7bf; --accent:#60a5fa;
+    --good:#16a34a; --bad:#ef4444;
+  }
+  *{box-sizing:border-box;font-family:Inter, system-ui, "Segoe UI", Roboto, Arial;}
+  body{margin:0;background:linear-gradient(180deg,#071226 0%, #071b2f 100%);color:#e6eef8;padding:20px;}
+  .wrap{max-width:1200px;margin:0 auto;}
+  header{display:flex;gap:20px;align-items:center;margin-bottom:18px;}
+  h1{margin:0;font-size:20px;}
+  .uploader{margin-left:auto;display:flex;gap:8px;align-items:center;}
+  .btn{background:var(--accent);border:none;padding:10px 14px;border-radius:8px;color:white;cursor:pointer;font-size:14px;}
+  .btn:hover{opacity:0.9;}
+  .btn.ghost{background:transparent;border:1px solid rgba(255,255,255,0.1);}
+  .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:16px 0;}
+  .card{background:linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); padding:14px;border-radius:10px;}
+  .muted{color:var(--muted);font-size:13px}
+  .value{font-size:20px;margin-top:6px;font-weight:600;}
+  .grid{display:grid;grid-template-columns:1fr 380px;gap:16px}
+  .panel{background:var(--card);padding:16px;border-radius:10px;overflow:auto;max-height:600px}
+  table{width:100%;border-collapse:collapse;font-size:13px;color:#dce9ff}
+  th,td{padding:10px 8px;text-align:left;border-bottom:1px dashed rgba(255,255,255,0.03)}
+  th{position:sticky;top:0;background:rgba(11,18,32,0.95);z-index:1;font-weight:600;}
+  .small{font-size:11px;color:var(--muted);margin-top:2px;}
+  .positive{color:var(--good)}
+  .negative{color:var(--bad)}
+  .controls{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap;}
+  .search{padding:8px 12px;border-radius:8px;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.02);color:inherit;font-size:13px;}
+  .search:focus{outline:none;border-color:var(--accent);}
+  .loader{padding-left:8px;color:var(--accent);}
+  footer{margin-top:18px;color:var(--muted);font-size:13px;text-align:center;}
+  .clickable{cursor:pointer;color:var(--accent);transition:opacity 0.2s;}
+  .clickable:hover{opacity:0.7;text-decoration:underline;}
+  .modal{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:1000;align-items:center;justify-content:center;}
+  .modal.show{display:flex;}
+  .modal-content{background:var(--card);padding:24px;border-radius:12px;max-width:900px;max-height:85vh;overflow:auto;width:90%;border:1px solid rgba(255,255,255,0.1);}
+  .modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;padding-bottom:12px;border-bottom:1px solid rgba(255,255,255,0.1);}
+  .modal-header h3{margin:0;font-size:18px;}
+  .modal-close{background:var(--bad);border:none;padding:8px 16px;border-radius:6px;color:white;cursor:pointer;font-size:13px;}
+  .modal-close:hover{opacity:0.9;}
+  #modalTable{max-height:500px;overflow-y:auto;}
+  @media (max-width:980px){ 
+    .grid{grid-template-columns:1fr} 
+    .cards{grid-template-columns:1fr;}
+    header{flex-direction:column;align-items:flex-start;}
+    .uploader{margin-left:0;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Bank Statement Insights — Corrected Parser</h1>
+      <div class="muted">Uses summary totals and groups by Particulars</div>
+    </div>
+
+    <div class="uploader">
+      <input id="file" type="file" accept="application/pdf" style="display:none"/>
+      <button id="btnUpload" class="btn">Upload PDF</button>
+      <button id="btnExportCSV" class="btn ghost">Export CSV</button>
+    </div>
+  </header>
+
+  <div class="cards">
+    <div class="card">
+      <div class="muted">Total Sent (Debits)</div>
+      <div class="value negative" id="totalSent">₹ —</div>
+    </div>
+    <div class="card">
+      <div class="muted">Total Received (Credits)</div>
+      <div class="value positive" id="totalReceived">₹ —</div>
+    </div>
+    <div class="card">
+      <div class="muted">Closing Balance</div>
+      <div class="value" id="closingBalance">₹ —</div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div>
+      <div class="panel">
+        <div class="controls">
+          <input id="search" class="search" placeholder="Filter counterparty..." />
+          <select id="sortBy" class="search">
+            <option value="sent">Sort by Total Sent</option>
+            <option value="received">Sort by Total Received</option>
+            <option value="net">Sort by Net</option>
+            <option value="count">Sort by Transaction Count</option>
+          </select>
+          <div id="status" class="loader muted">Idle</div>
+        </div>
+
+        <h3 style="margin:6px 0 12px 0">Top Counterparties</h3>
+        <table id="accountsTable">
+          <thead><tr><th>Counterparty</th><th>Total Sent</th><th>Total Received</th><th>Net</th><th>Txns</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel">
+        <h3 style="margin-top:0;margin-bottom:16px;">Top Charts</h3>
+        <div style="margin-bottom:12px;"><strong class="muted" style="font-size:12px;">Top Debits (Sent)</strong></div>
+        <canvas id="chartSend" style="width:100%;height:200px"></canvas>
+        <div style="margin:20px 0 12px 0;"><strong class="muted" style="font-size:12px;">Top Credits (Received)</strong></div>
+        <canvas id="chartRecv" style="width:100%;height:200px;"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <footer>💡 Click on any counterparty name to see detailed transactions • Data parsed from Summary section</footer>
+</div>
+
+<!-- Modal for transaction details -->
+<div id="modal" class="modal" onclick="closeModalOnBackdrop(event)">
+  <div class="modal-content" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h3 id="modalTitle">Transactions</h3>
+      <button class="modal-close" onclick="closeModal()">✕ Close</button>
+    </div>
+    <div style="overflow-x:auto;">
+      <table id="modalTable">
+        <thead><tr><th>Date</th><th>Cheque</th><th>Sent</th><th>Received</th><th>Balance</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+// Initialize PDF.js
+const pdfjsLib = window['pdfjsLib'];
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.9.179/pdf.worker.min.js';
+
+// Global state
+let parsedData = null;
+let sendChart = null;
+let recvChart = null;
+
+// DOM elements
+const fileInput = document.getElementById('file');
+const btnUpload = document.getElementById('btnUpload');
+const status = document.getElementById('status');
+const totalSentEl = document.getElementById('totalSent');
+const totalReceivedEl = document.getElementById('totalReceived');
+const closingBalanceEl = document.getElementById('closingBalance');
+const accountsTbody = document.querySelector('#accountsTable tbody');
+const searchInput = document.getElementById('search');
+const sortBy = document.getElementById('sortBy');
+const btnExportCSV = document.getElementById('btnExportCSV');
+
+// Event listeners
+btnUpload.onclick = () => fileInput.click();
+fileInput.onchange = handleFileUpload;
+searchInput.oninput = renderGroups;
+sortBy.onchange = renderGroups;
+btnExportCSV.onclick = exportCSV;
+
+// Parse summary section
+function extractSummaryTotals(text) {
+  const summary = {
+    totalDebits: 0,
+    totalCredits: 0,
+    closingBalance: 0
+  };
+
+  const debitMatch = text.match(/Total\s+Debits\s*:?\s*([\d,]+\.?\d*)/i);
+  if (debitMatch) {
+    summary.totalDebits = parseFloat(debitMatch[1].replace(/,/g, ''));
+  }
+
+  const creditMatch = text.match(/Total\s+Credits\s*:?\s*([\d,]+\.?\d*)/i);
+  if (creditMatch) {
+    summary.totalCredits = parseFloat(creditMatch[1].replace(/,/g, ''));
+  }
+
+  const closingMatch = text.match(/Closing\s+Balance\s*:?\s*([\d,]+\.?\d*)\s*Cr/i);
+  if (closingMatch) {
+    summary.closingBalance = parseFloat(closingMatch[1].replace(/,/g, ''));
+  }
+
+  return summary;
+}
+
+// Parse transactions from statement
+
+// Parse a single transaction line
+
+
+// Parse transactions from statement
+function parseTransactions(text) {
+  const transactions = [];
+  const lines = text.split('\n');
+  
+  let inTable = false;
+  let buffer = '';
+  
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i].trim();
+    
+    if (!line) continue;
+    
+    // Detect start of transaction table
+    if (/SI\s+(No\.?|Number)?\s*Date\s+Particulars/i.test(line) || 
+        /Serial\s+Date\s+Particulars/i.test(line)) {
+      inTable = true;
+      continue;
+    }
+    
+    // Detect end of table (Summary section starts)
+    if (/Summary\s*:?$/i.test(line) || 
+        /Total\s+Debits\s*:/i.test(line) ||
+        /^Summary\s+of\s+/i.test(line)) {
+      // Process last buffered transaction
+      if (buffer.trim()) {
+        const tx = parseTransactionLine(buffer);
+        if (tx) transactions.push(tx);
+      }
+      break;
+    }
+    
+    if (!inTable) continue;
+    
+    // Check if this line starts a new transaction (begins with SI number and date)
+    // Pattern: <number> <date> <rest of line>
+    const newTxMatch = line.match(/^(\d{1,4})\s+(\d{2}[-\/]\d{2}[-\/]\d{4})\s+(.+)/);
+    
+    if (newTxMatch) {
+      // Process previous buffered transaction
+      if (buffer.trim()) {
+        const tx = parseTransactionLine(buffer);
+        if (tx) transactions.push(tx);
+      }
+      
+      // Start new buffer with current line
+      buffer = line;
+    } else {
+      // This is a continuation line - append to buffer
+      buffer += ' ' + line;
+    }
+  }
+  
+  // Don't forget the last transaction in buffer
+  if (buffer.trim() && inTable) {
+    const tx = parseTransactionLine(buffer);
+    if (tx) transactions.push(tx);
+  }
+  
+  return transactions;
+}
+
+// Parse a single transaction line (can be multi-line concatenated)
+function parseTransactionLine(line) {
+  if (!line || !line.trim()) return null;
+  
+  // Extract date (DD-MM-YYYY or DD/MM/YYYY format)
+  const dateMatch = line.match(/(\d{2}[-\/]\d{2}[-\/]\d{4})/);
+  if (!dateMatch) return null;
+  
+  const date = dateMatch[1];
+  
+  // Extract all numbers (amounts) from the line
+  // This regex captures numbers with optional commas and decimals
+  const numberRegex = /\b(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)\b/g;
+  const numbers = [];
+  let match;
+  
+  while ((match = numberRegex.exec(line)) !== null) {
+    const num = parseFloat(match[1].replace(/,/g, ''));
+    if (!isNaN(num) && num > 0) {
+      numbers.push(num);
+    }
+  }
+  
+  // Remove date numbers (like 01, 02, 2024) from numbers array
+  const cleanNumbers = numbers.filter(n => n >= 10); // Amounts are typically >= 10
+  
+  if (cleanNumbers.length === 0) return null;
+  
+  // Extract cheque number (typically 6-8 digits)
+  const cheqMatch = line.match(/\b(\d{6,8})\b/);
+  const cheqNum = cheqMatch ? cheqMatch[1] : '';
+  
+  // Last number is always the balance
+  const balance = cleanNumbers[cleanNumbers.length - 1];
+  
+  let withdrawal = 0;
+  let deposit = 0;
+  
+  // Determine withdrawal vs deposit based on number of amounts
+  if (cleanNumbers.length >= 3) {
+    // Format: withdrawal, deposit, balance
+    withdrawal = cleanNumbers[cleanNumbers.length - 3];
+    deposit = cleanNumbers[cleanNumbers.length - 2];
+  } else if (cleanNumbers.length === 2) {
+    // Either withdrawal OR deposit, plus balance
+    const amount = cleanNumbers[0];
+    
+    // Check if it's a credit or debit based on keywords
+    if (/UPI.*CR|NEFT.*CR|RTGS.*CR|IMPS.*CR|BY\s+CASH|SALARY|Interest|Deposit|Credit/i.test(line)) {
+      deposit = amount;
+    } else if (/UPI.*DR|NEFT.*DR|RTGS.*DR|IMPS.*DR|TO\s+SELF|Withdrawal|Charges|POS|ATM/i.test(line)) {
+      withdrawal = amount;
+    } else {
+      // Default: if contains certain keywords, it's likely a deposit
+      if (/\bCR\b|\bCREDIT\b/i.test(line)) {
+        deposit = amount;
+      } else {
+        withdrawal = amount;
+      }
+    }
+  } else if (cleanNumbers.length === 1) {
+    // Only balance present - might be a zero transaction or error
+    return null;
+  }
+  
+  // Extract particulars - remove SI number, date, amounts, and clean up
+  let particulars = line
+    .replace(/^\d{1,4}\s+/, '') // Remove SI number
+    .replace(/\d{2}[-\/]\d{2}[-\/]\d{4}/, '') // Remove date
+    .replace(/\b\d{1,3}(?:,\d{3})*(?:\.\d{2})?\b/g, '') // Remove all numbers
+    .replace(/\s*Cr\s*$/i, '') // Remove trailing Cr
+    .replace(/\s*Dr\s*$/i, '') // Remove trailing Dr
+    .replace(/\s+/g, ' ') // Normalize spaces
+    .trim();
+  
+  // Skip if particulars is too short or empty
+  if (!particulars || particulars.length < 3) {
+    particulars = 'Transaction';
+  }
+  
+  return {
+    date,
+    particulars,
+    cheqNum,
+    withdrawal,
+    deposit,
+    balance
+  };
+}
+
+
+// Group transactions by counterparty (Account/UPI ID from Particulars)
+function groupByCounterparty(transactions) {
+  const groups = {};
+  
+  transactions.forEach(tx => {
+    let key = extractCounterparty(tx.particulars);
+    
+    // Initialize group if doesn't exist
+    if (!groups[key]) {
+      groups[key] = {
+        name: key,
+        totalSent: 0,
+        totalReceived: 0,
+        count: 0,
+        transactions: []
+      };
+    }
+    
+    // Add to group
+    groups[key].totalSent += tx.withdrawal;
+    groups[key].totalReceived += tx.deposit;
+    groups[key].count++;
+    groups[key].transactions.push(tx);
+  });
+  
+  return groups;
+}
+// Handle file upload
+async function handleFileUpload(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  
+  status.textContent = 'Reading PDF...';
+  
+  try {
+    // Read PDF
+    const arrayBuffer = await file.arrayBuffer();
+    const doc = await pdfjsLib.getDocument({data: arrayBuffer}).promise;
+    
+    let fullText = '';
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page = await doc.getPage(i);
+      const textContent = await page.getTextContent();
+      const pageText = textContent.items.map(item => item.str).join(' ');
+      fullText += pageText + '\n';
+    }
+    
+    status.textContent = 'Parsing transactions...';
+    
+    // Parse data using the corrected algorithm
+    const summary = extractSummaryTotals(fullText);
+    const transactions = parseTransactions(fullText);
+    const groups = groupByCounterparty(transactions);
+    
+    parsedData = { summary, transactions, groups };
+    
+    console.log('Parsed data:', parsedData);
+    
+    // Render results
+    renderSummary();
+    renderGroups();
+    renderCharts();
+    
+    status.textContent = `✓ Parsed ${transactions.length} transactions`;
+  } catch (err) {
+    console.error('Parsing error:', err);
+    status.textContent = '✗ Error: ' + (err.message || err);
+  }
+}
+
+
+
+function extractCounterparty(particulars) {
+  if (!particulars || particulars.trim().length === 0) {
+    return 'Unknown';
+  }
+  
+  let text = particulars.trim();
+  
+  // Handle UPI transactions (UPIAR/UPIAB)
+  // Format: UPIAR/UPIAB <UPI_ID> / <Reference>
+  const upiMatch = text.match(/^(UPIAR|UPIAB)\s*[\/\s]*([^\s\/]+@[^\s\/]+)/i);
+  if (upiMatch) {
+    return upiMatch[2].trim(); // Return the UPI ID
+  }
+  
+  // Handle account transfers
+  // Format: TO/FROM <ACCOUNT_NUMBER> or A/C <ACCOUNT_NUMBER>
+  const accountMatch = text.match(/(?:TO|FROM|A\/C)\s+(\d+)/i);
+  if (accountMatch) {
+    return 'Account ' + accountMatch[1];
+  }
+  
+  // Handle NEFT/RTGS/IMPS transfers
+  // Format: NEFT/RTGS/IMPS-<REF>-<NAME>
+  const neftMatch = text.match(/^(NEFT|RTGS|IMPS)[^\-]*\-[^\-]*\-([^\-\/]+)/i);
+  if (neftMatch) {
+    return neftMatch[2].trim();
+  }
+  
+  // Handle card transactions
+  // Format: POS <merchant_name> or ATM <location>
+  const posMatch = text.match(/^(?:POS|CARD)\s+([^\d\/]+?)(?:\s+\d|$)/i);
+  if (posMatch) {
+    return posMatch[1].trim();
+  }
+  
+  const atmMatch = text.match(/^ATM\s+([^\d\/]+?)(?:\s+\d|$)/i);
+  if (atmMatch) {
+    return 'ATM - ' + atmMatch[1].trim();
+  }
+  
+  // Handle salary/interest credits
+  if (/SALARY|SAL\s+CR/i.test(text)) {
+    return 'Salary Credit';
+  }
+  if (/INTEREST|INT\s+CR/i.test(text)) {
+    return 'Interest Credit';
+  }
+  
+  // Handle cash deposits/withdrawals
+  if (/CASH\s+DEP|BY\s+CASH/i.test(text)) {
+    return 'Cash Deposit';
+  }
+  if (/CASH\s+WDL|ATM\s+WDL/i.test(text)) {
+    return 'Cash Withdrawal';
+  }
+  
+  // Handle charges/fees
+  if (/CHARGES|FEE|SMS\s+CHG/i.test(text)) {
+    return 'Bank Charges';
+  }
+  
+  // Default: Take first meaningful segment before "/" or first 30 chars
+  const segments = text.split('/');
+  let firstSegment = segments[0].trim();
+  
+  // Remove common prefixes
+  firstSegment = firstSegment.replace(/^(TO|FROM|BY|CR|DR)\s+/i, '');
+  
+  // If still too long or contains mostly numbers, use generic name
+  if (firstSegment.length > 50 || /^\d+$/.test(firstSegment)) {
+    return 'Other Transaction';
+  }
+  
+  return firstSegment || 'Other Transaction';
+}
+
+// Render summary cards
+function renderSummary() {
+  if (!parsedData) return;
+  
+  const { summary } = parsedData;
+  
+  totalSentEl.textContent = '₹ ' + formatMoney(summary.totalDebits);
+  totalReceivedEl.textContent = '₹ ' + formatMoney(summary.totalCredits);
+  closingBalanceEl.textContent = '₹ ' + formatMoney(summary.closingBalance);
+  
+  const net = summary.totalCredits - summary.totalDebits;
+  closingBalanceEl.className = net >= 0 ? 'value positive' : 'value negative';
+}
+
+// Render counterparty groups table
+function renderGroups() {
+  if (!parsedData) return;
+  
+  const { groups } = parsedData;
+  const query = searchInput.value.toLowerCase();
+  
+  // Convert to array and filter by search
+  let arr = Object.values(groups).filter(g => 
+    g.name.toLowerCase().includes(query)
+  );
+  
+  // Sort by selected criteria
+  const sortKey = sortBy.value;
+  arr.sort((a, b) => {
+    if (sortKey === 'net') {
+      return (b.totalReceived - b.totalSent) - (a.totalReceived - a.totalSent);
+    }
+    if (sortKey === 'sent') return b.totalSent - a.totalSent;
+    if (sortKey === 'received') return b.totalReceived - a.totalReceived;
+    if (sortKey === 'count') return b.count - a.count;
+    return 0;
+  });
+  
+  // Render table rows
+  accountsTbody.innerHTML = '';
+  arr.forEach(group => {
+    const net = group.totalReceived - group.totalSent;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>
+        <strong class="clickable" data-name="${escapeHtml(group.name)}">${escapeHtml(group.name)}</strong>
+        <div class="small">${group.count} transaction${group.count > 1 ? 's' : ''}</div>
+      </td>
+      <td class="negative">₹ ${formatMoney(group.totalSent)}</td>
+      <td class="positive">₹ ${formatMoney(group.totalReceived)}</td>
+      <td class="${net >= 0 ? 'positive' : 'negative'}">₹ ${formatMoney(net)}</td>
+      <td class="muted">${group.count}</td>
+    `;
+    accountsTbody.appendChild(tr);
+  });
+  
+  // Add click handlers to show transaction details
+  document.querySelectorAll('.clickable').forEach(el => {
+    el.onclick = () => showTransactionDetails(el.dataset.name);
+  });
+}
+
+// Show transaction details in modal
+function showTransactionDetails(counterpartyName) {
+  if (!parsedData) return;
+  
+  const group = parsedData.groups[counterpartyName];
+  if (!group) return;
+  
+  document.getElementById('modalTitle').textContent = `${counterpartyName} (${group.count} transactions)`;
+  
+  const tbody = document.querySelector('#modalTable tbody');
+  tbody.innerHTML = '';
+  
+  // Sort by date (most recent first)
+  const sortedTxs = [...group.transactions].sort((a, b) => {
+    const dateA = a.date.split('-').reverse().join('');
+    const dateB = b.date.split('-').reverse().join('');
+    return dateB.localeCompare(dateA);
+  });
+  
+  sortedTxs.forEach(tx => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="white-space:nowrap;">${tx.date}</td>
+      <td class="small">${tx.cheqNum || '—'}</td>
+      <td class="${tx.withdrawal > 0 ? 'negative' : 'muted'}">₹ ${formatMoney(tx.withdrawal)}</td>
+      <td class="${tx.deposit > 0 ? 'positive' : 'muted'}">₹ ${formatMoney(tx.deposit)}</td>
+      <td>₹ ${formatMoney(tx.balance)}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+  
+  document.getElementById('modal').classList.add('show');
+}
+
+// Close modal
+function closeModal() {
+  document.getElementById('modal').classList.remove('show');
+}
+
+function closeModalOnBackdrop(event) {
+  if (event.target.id === 'modal') {
+    closeModal();
+  }
+}
+
+// Render charts
+function renderCharts() {
+  if (!parsedData) return;
+  
+  const arr = Object.values(parsedData.groups);
+  
+  // Top 8 by amount sent
+  const topSent = arr
+    .sort((a, b) => b.totalSent - a.totalSent)
+    .slice(0, 8)
+    .filter(g => g.totalSent > 0);
+  
+  // Top 8 by amount received
+  const topRecv = arr
+    .sort((a, b) => b.totalReceived - a.totalReceived)
+    .slice(0, 8)
+    .filter(g => g.totalReceived > 0);
+  
+  // Sent chart
+  const ctxSend = document.getElementById('chartSend').getContext('2d');
+  if (sendChart) sendChart.destroy();
+  sendChart = new Chart(ctxSend, {
+    type: 'bar',
+    data: {
+      labels: topSent.map(g => truncate(g.name, 15)),
+      datasets: [{
+        label: 'Total Sent',
+        data: topSent.map(g => g.totalSent),
+        backgroundColor: 'rgba(239, 68, 68, 0.7)',
+        borderColor: 'rgba(239, 68, 68, 1)',
+        borderWidth: 1
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { 
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => 'Sent: ₹' + formatMoney(ctx.parsed.y)
+          }
+        }
+      },
+      scales: { 
+        y: { 
+          ticks: { 
+            callback: v => '₹' + formatMoney(v),
+            color: '#9aa7bf'
+          },
+          grid: { color: 'rgba(255,255,255,0.05)' }
+        },
+        x: {
+          ticks: { color: '#9aa7bf' },
+          grid: { display: false }
+        }
+      }
+    }
+  });
+  
+  // Received chart
+  const ctxRecv = document.getElementById('chartRecv').getContext('2d');
+  if (recvChart) recvChart.destroy();
+  recvChart = new Chart(ctxRecv, {
+    type: 'bar',
+    data: {
+      labels: topRecv.map(g => truncate(g.name, 15)),
+      datasets: [{
+        label: 'Total Received',
+        data: topRecv.map(g => g.totalReceived),
+        backgroundColor: 'rgba(22, 163, 74, 0.7)',
+        borderColor: 'rgba(22, 163, 74, 1)',
+        borderWidth: 1
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { 
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => 'Received: ₹' + formatMoney(ctx.parsed.y)
+          }
+        }
+      },
+      scales: { 
+        y: { 
+          ticks: { 
+            callback: v => '₹' + formatMoney(v),
+            color: '#9aa7bf'
+          },
+          grid: { color: 'rgba(255,255,255,0.05)' }
+        },
+        x: {
+          ticks: { color: '#9aa7bf' },
+          grid: { display: false }
+        }
+      }
+    }
+  });
+}
+
+// Export to CSV
+function exportCSV() {
+  if (!parsedData) return alert('No data to export');
+  
+  const headers = ['Date', 'Particulars', 'Cheque Num', 'Withdrawal', 'Deposit', 'Balance'];
+  const rows = [headers.join(',')];
+  
+  parsedData.transactions.forEach(tx => {
+    const row = [
+      tx.date,
+      `"${tx.particulars.replace(/"/g, '""')}"`,
+      tx.cheqNum || '',
+      tx.withdrawal.toFixed(2),
+      tx.deposit.toFixed(2),
+      tx.balance.toFixed(2)
+    ];
+    rows.push(row.join(','));
+  });
+  
+  const csv = rows.join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'bank_statement_' + Date.now() + '.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// Utility functions
+function formatMoney(n) {
+  if (!n || isNaN(n)) return '0.00';
+  return n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+function truncate(str, len) {
+  return str.length > len ? str.substring(0, len) + '...' : str;
+}
+</script>
+</body>
+</html>
