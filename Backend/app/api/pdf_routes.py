@@ -7,6 +7,10 @@ from app.services.banks.union_bank import extract_upi_summary
 
 router = APIRouter()
 
+@router.get("/")
+async def read_root():
+    return {"Hello :)": "PDF Parsing API is up and running."}
+
 @router.post("/extract_text")
 async def extract_pdf_text(file: UploadFile = File(...)):
     return await extract_text_from_pdf(file)
