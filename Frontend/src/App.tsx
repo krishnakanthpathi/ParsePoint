@@ -38,9 +38,8 @@ interface ApiResponse {
 const StatCard = ({ title, value, icon, colorClass = 'text-gray-500' }: { title: string; value: string; icon: React.ReactNode; colorClass?: string }) => (
   <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-md dark:border dark:border-gray-700 flex items-center space-x-4 transition-transform transform hover:scale-105">
     <div className={`p-3 rounded-full ${colorClass.replace('text-', 'bg-').replace('500', '100')} dark:${colorClass.replace('text-', 'bg-').replace('500', '900/50')}`}>
-      {/* FIXED: Safely clone the icon element to prevent crashes and merge classNames */}
-      {React.isValidElement(icon) && React.cloneElement(icon, {
-        className: `h-8 w-8 ${colorClass} ${icon.props.className || ''}`.trim()
+      {React.isValidElement(icon) && React.cloneElement(icon as React.ReactElement<{ className?: string }>, {
+        className: `h-8 w-8 ${colorClass} `.trim()
       })}
     </div>
     <div>
@@ -153,14 +152,38 @@ const App = () => {
   const PIE_COLORS = ["#6366F1", "#818CF8", "#A5B4FC", "#C7D2FE", "#E0E7FF"];
   const BAR_COLORS = { debited: "#F87171", credited: "#4ADE80" };
   const TOP_N_FOR_PIE = 5;
+  const SAMPLE_SIZE = 50;
 
-  const pieChartData = upiSummary
+  // Create a random sample of up to 50 transactions
+  const randomSampleData = [...upiSummary]
+    .sort(() => 0.5 - Math.random()) // Shuffle the array
+    .slice(0, SAMPLE_SIZE); // Get the first 50 items
+
+  // Pie chart data is the top 5 from the random sample
+  const pieChartData = [...randomSampleData]
     .map(u => ({
         name: u.UPI,
         value: u.total_debited + u.total_credited,
     }))
     .sort((a, b) => b.value - a.value)
     .slice(0, TOP_N_FOR_PIE);
+  
+  // Bar chart data is the sorted random sample
+  const barChartData = [...randomSampleData]
+    .sort((a, b) => (b.total_credited + b.total_debited) - (a.total_credited + a.total_debited));
+
+  const RADIAN = Math.PI / 180;
+  const renderCustomizedLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }: {cx: number, cy: number, midAngle: number, innerRadius: number, outerRadius: number, percent: number}) => {
+    const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
+    const x = cx + radius * Math.cos(-midAngle * RADIAN);
+    const y = cy + radius * Math.sin(-midAngle * RADIAN);
+
+    return (
+      <text x={x} y={y} fill="white" textAnchor="middle" dominantBaseline="central">
+        {`${(percent * 100).toFixed(0)}%`}
+      </text>
+    );
+  };
 
   return (
     <div className="bg-slate-50 dark:bg-gray-900 min-h-screen font-sans text-gray-800 dark:text-gray-200 transition-colors duration-300">
@@ -203,7 +226,6 @@ const App = () => {
                 </div>
             </div>
             {error && <p className="text-red-500 mt-2 text-sm">{error}</p>}
-            {/* FIXED: Restored button content and loading state */}
             <button
                 onClick={handleUpload}
                 className="mt-4 w-full flex items-center justify-center px-4 py-3 bg-indigo-600 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
@@ -230,9 +252,25 @@ const App = () => {
               <StatCard title="Total Debited" value={`₹${overallTotals.total_debited.toLocaleString()}`} icon={<ArrowDownCircle />} colorClass="text-red-500" />
             </div>
 
+            {/* UPDATED: Bar Chart showing a random sample */}
+            <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-md dark:border dark:border-gray-700">
+              <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">Random Sample Transaction Volume (up to 50)</h2>
+              <ResponsiveContainer width="100%" height={400}>
+                  <BarChart data={barChartData} margin={{ top: 5, right: 20, left: -10, bottom: 80 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? "#4B5563" : "#E5E7EB"} vertical={false} />
+                      <XAxis dataKey="UPI" interval={0} angle={-45} textAnchor="end" tick={{ fill: isDarkMode ? '#D1D5DB' : '#374151', fontSize: 12 }} />
+                      <YAxis tickFormatter={(value) => `₹${Number(value)/1000}k`} tick={{ fill: isDarkMode ? '#D1D5DB' : '#374151' }} />
+                      <Tooltip formatter={(value: number) => `₹${value.toLocaleString()}`} contentStyle={{ backgroundColor: isDarkMode ? '#1F2937' : '#FFFFFF', border: '1px solid #374151' }} itemStyle={{ color: isDarkMode ? '#E5E7EB' : '#1F2937' }}/>
+                      <Legend wrapperStyle={{ color: isDarkMode ? '#D1D5DB' : '#374151' }} />
+                      <Bar dataKey="total_credited" fill={BAR_COLORS.credited} name="Credited" />
+                      <Bar dataKey="total_debited" fill={BAR_COLORS.debited} name="Debited" />
+                  </BarChart>
+              </ResponsiveContainer>
+            </div>
+
             <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
                 <div className="lg:col-span-3 bg-white dark:bg-gray-800 p-6 rounded-xl shadow-md dark:border dark:border-gray-700">
-                    <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">UPI Breakdown</h2>
+                    <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">Full UPI Breakdown</h2>
                     <div className="overflow-x-auto">
                         <table className="w-full text-left">
                             <thead className="border-b-2 border-gray-200 dark:border-gray-700">
@@ -255,32 +293,27 @@ const App = () => {
                     </div>
                 </div>
 
-                <div className="lg:col-span-2 space-y-8">
-                    <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-md dark:border dark:border-gray-700">
-                        <h3 className="font-semibold mb-4 text-gray-900 dark:text-white">Top 5 Contacts by Volume</h3>
-                        <ResponsiveContainer width="100%" height={250}>
-                        <PieChart>
-                            <Pie data={pieChartData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label>
-                                {pieChartData.map((_, idx) => <Cell key={`cell-${idx}`} fill={PIE_COLORS[idx % PIE_COLORS.length]} />)}
-                            </Pie>
-                            <Tooltip formatter={(value: number) => `₹${value.toLocaleString()}`} contentStyle={{ backgroundColor: isDarkMode ? '#1F2937' : '#FFFFFF', border: '1px solid #374151' }} itemStyle={{ color: isDarkMode ? '#E5E7EB' : '#1F2937' }}/>
-                        </PieChart>
-                        </ResponsiveContainer>
-                    </div>
-                    <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-md dark:border dark:border-gray-700">
-                        <h3 className="font-semibold mb-4 text-gray-900 dark:text-white">Overall Cash Flow</h3>
-                        <ResponsiveContainer width="100%" height={250}>
-                        <BarChart data={[{ name: 'Total', Debited: overallTotals.total_debited, Credited: overallTotals.total_credited }]} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? "#4B5563" : "#E5E7EB"} vertical={false} />
-                            <XAxis dataKey="name" tick={{ fill: isDarkMode ? '#D1D5DB' : '#374151' }} />
-                            <YAxis tickFormatter={(value) => `₹${Number(value)/1000}k`} tick={{ fill: isDarkMode ? '#D1D5DB' : '#374151' }} />
-                            <Tooltip formatter={(value: number) => `₹${value.toLocaleString()}`} contentStyle={{ backgroundColor: isDarkMode ? '#1F2937' : '#FFFFFF', border: '1px solid #374151' }} itemStyle={{ color: isDarkMode ? '#E5E7EB' : '#1F2937' }}/>
-                            <Legend wrapperStyle={{ color: isDarkMode ? '#D1D5DB' : '#374151' }} />
-                            <Bar dataKey="Debited" fill={BAR_COLORS.debited} name="Total Debited" />
-                            <Bar dataKey="Credited" fill={BAR_COLORS.credited} name="Total Credited" />
-                        </BarChart>
-                        </ResponsiveContainer>
-                    </div>
+                {/* UPDATED: Pie chart reflects top 5 from the random sample */}
+                <div className="lg:col-span-2 bg-white dark:bg-gray-800 p-6 rounded-xl shadow-md dark:border dark:border-gray-700">
+                    <h3 className="font-semibold mb-4 text-gray-900 dark:text-white">Top 5 Contacts (from Sample)</h3>
+                    <ResponsiveContainer width="100%" height={300}>
+                    <PieChart>
+                        <Pie 
+                            data={pieChartData} 
+                            dataKey="value" 
+                            nameKey="name" 
+                            cx="50%" 
+                            cy="50%" 
+                            outerRadius={100} 
+                            labelLine={false}
+                            label={renderCustomizedLabel}
+                        >
+                            {pieChartData.map((_, idx) => <Cell key={`cell-${idx}`} fill={PIE_COLORS[idx % PIE_COLORS.length]} />)}
+                        </Pie>
+                        <Tooltip formatter={(value: number) => `₹${value.toLocaleString()}`} contentStyle={{ backgroundColor: isDarkMode ? '#1F2937' : '#FFFFFF', border: '1px solid #374151' }} itemStyle={{ color: isDarkMode ? '#E5E7EB' : '#1F2937' }}/>
+                        <Legend wrapperStyle={{ color: isDarkMode ? '#D1D5DB' : '#374151' }} />
+                    </PieChart>
+                    </ResponsiveContainer>
                 </div>
             </div>
           </div>
@@ -298,3 +331,4 @@ const App = () => {
 };
 
 export default App;
+
