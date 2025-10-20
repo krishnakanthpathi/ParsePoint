@@ -1,8 +1,6 @@
 from fastapi import FastAPI
-
+from app.api.pdf_routes import router as pdf_router
 
 app = FastAPI(title="PDF Processing API")
 
-@app.get("/")
-async def read_root():
-    return {"message": "Welcome to the PDF Processing API!"}
+app.include_router(pdf_router, prefix="/pdf", tags=["PDF"])
