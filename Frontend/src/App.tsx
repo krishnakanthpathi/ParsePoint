@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import axios from "axios";
-import { Analytics } from "@vercel/analytics/next"
+// import { Analytics } from "@vercel/analytics/next"
 import {
   PieChart,
   Pie,
@@ -357,7 +357,6 @@ const App = () => {
       </main>
 
       {selectedUPI && <TransactionModal upiItem={selectedUPI} onClose={() => setSelectedUPI(null)} />}
-        <Analytics />
     </div>
   );
 };
