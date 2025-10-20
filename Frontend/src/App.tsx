@@ -1,18 +1,127 @@
-import React, { useState } from 'react';
-import axios from 'axios';
-import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import React, { useState, useEffect } from "react";
+import axios from "axios";
+import {
+  PieChart,
+  Pie,
+  Cell,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from "recharts";
+import { UploadCloud, X, ArrowUpCircle, ArrowDownCircle, Banknote, Moon, Sun } from 'lucide-react';
+
+// --- TYPE DEFINITIONS ---
+type Transaction = string;
+
+interface UpiSummaryItem {
+  UPI: string;
+  total_debited: number;
+  total_credited: number;
+  transactions: Transaction[];
+}
+
+interface ApiResponse {
+  upi_summary: UpiSummaryItem[];
+  overall_totals: {
+    total_debited: number;
+    total_credited: number;
+  };
+}
+
+// --- REUSABLE UI COMPONENTS ---
+
+const StatCard = ({ title, value, icon, colorClass = 'text-gray-500' }: { title: string; value: string; icon: React.ReactNode; colorClass?: string }) => (
+  <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-md dark:border dark:border-gray-700 flex items-center space-x-4 transition-transform transform hover:scale-105">
+    <div className={`p-3 rounded-full ${colorClass.replace('text-', 'bg-').replace('500', '100')} dark:${colorClass.replace('text-', 'bg-').replace('500', '900/50')}`}>
+      {/* FIXED: Safely clone the icon element to prevent crashes and merge classNames */}
+      {React.isValidElement(icon) && React.cloneElement(icon, {
+        className: `h-8 w-8 ${colorClass} ${icon.props.className || ''}`.trim()
+      })}
+    </div>
+    <div>
+      <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">{title}</p>
+      <p className="text-2xl font-bold text-gray-800 dark:text-gray-100">{value}</p>
+    </div>
+  </div>
+);
+
+const TransactionModal = ({ upiItem, onClose }: { upiItem: UpiSummaryItem; onClose: () => void; }) => (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 backdrop-blur-sm animate-fade-in">
+    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-2xl p-6 w-full max-w-lg max-h-[90vh] flex flex-col transform transition-all animate-slide-up">
+      <div className="flex justify-between items-center mb-4 border-b dark:border-gray-700 pb-4">
+        <h3 className="text-xl font-bold text-gray-800 dark:text-gray-100 break-all">Transactions for <span className="text-indigo-600 dark:text-indigo-400">{upiItem.UPI}</span></h3>
+        <button onClick={onClose} className="p-2 rounded-full text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-800 dark:hover:text-gray-100 transition-colors">
+          <X size={24} />
+        </button>
+      </div>
+      <div className="flex space-x-4 mb-4 text-center">
+         <div className="flex-1 p-3 bg-red-50 dark:bg-red-900/30 rounded-lg">
+            <p className="text-sm text-red-500 dark:text-red-400">Total Debited</p>
+            <p className="font-bold text-lg text-red-700 dark:text-red-300">₹{upiItem.total_debited.toLocaleString()}</p>
+         </div>
+         <div className="flex-1 p-3 bg-green-50 dark:bg-green-900/30 rounded-lg">
+            <p className="text-sm text-green-500 dark:text-green-400">Total Credited</p>
+            <p className="font-bold text-lg text-green-700 dark:text-green-300">₹{upiItem.total_credited.toLocaleString()}</p>
+         </div>
+      </div>
+      <div className="overflow-y-auto flex-grow pr-2">
+        <h4 className="font-semibold text-gray-700 dark:text-gray-300 mb-2">Transaction List:</h4>
+        <ul className="space-y-2">
+          {upiItem.transactions.map((tx, idx) => (
+            <li key={idx} className="bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md text-sm text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700">{tx}</li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  </div>
+);
+
+
+// --- MAIN APP COMPONENT ---
 
 const App = () => {
   const [file, setFile] = useState<File | null>(null);
-  const [transactions, setTransactions] = useState<any[]>([]);
-  const [upiSummary, setUpiSummary] = useState<any[]>([]);
+  const [fileName, setFileName] = useState<string>("");
+  const [upiSummary, setUpiSummary] = useState<UpiSummaryItem[]>([]);
+  const [overallTotals, setOverallTotals] = useState<{ total_debited: number; total_credited: number; } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedTransaction, setSelectedTransaction] = useState<any | null>(null);
+  const [selectedUPI, setSelectedUPI] = useState<UpiSummaryItem | null>(null);
+  const [isDarkMode, setIsDarkMode] = useState(false);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      setFile(e.target.files[0]);
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('theme');
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    if (savedTheme === 'dark' || (!savedTheme && prefersDark)) {
+        setIsDarkMode(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isDarkMode) {
+        document.documentElement.classList.add('dark');
+        localStorage.setItem('theme', 'dark');
+    } else {
+        document.documentElement.classList.remove('dark');
+        localStorage.setItem('theme', 'light');
+    }
+  }, [isDarkMode]);
+
+  const handleFileChange = (files: FileList | null) => {
+    if (files && files[0]) {
+      const selectedFile = files[0];
+      if(selectedFile.type !== "application/pdf") {
+        setError("Please upload a PDF file.");
+        return;
+      }
+      setFile(selectedFile);
+      setFileName(selectedFile.name);
+      setError(null);
     }
   };
 
@@ -20,160 +129,170 @@ const App = () => {
     if (!file) return;
     setLoading(true);
     setError(null);
+    setUpiSummary([]);
+    setOverallTotals(null);
 
     const formData = new FormData();
-    formData.append('file', file);
+    formData.append("file", file);
 
     try {
-      const response = await axios.post('https://parse-point.vercel.app/pdf/', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-      const { transactions, upi_summary } = response.data;
-      setTransactions(transactions);
-      setUpiSummary(upi_summary);
+      const response = await axios.post<ApiResponse>(
+        "https://parse-point.vercel.app/pdf/extract_upi_summary",
+        formData,
+        { headers: { "Content-Type": "multipart/form-data" } }
+      );
+      setUpiSummary(response.data.upi_summary);
+      setOverallTotals(response.data.overall_totals);
     } catch (err) {
-      setError('Failed to process the PDF. Please try again.');
+      setError("Failed to process the PDF. Please check the file and try again.");
     } finally {
       setLoading(false);
     }
   };
+  
+  const PIE_COLORS = ["#6366F1", "#818CF8", "#A5B4FC", "#C7D2FE", "#E0E7FF"];
+  const BAR_COLORS = { debited: "#F87171", credited: "#4ADE80" };
+  const TOP_N_FOR_PIE = 5;
 
-  const handleTransactionClick = (transaction: any) => {
-    setSelectedTransaction(transaction);
-  };
-
-  const handleCloseModal = () => {
-    setSelectedTransaction(null);
-  };
-
-  const renderPieChart = (data: any[]) => (
-    <ResponsiveContainer width="100%" height={300}>
-      <PieChart>
-        <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} fill="#8884d8" label>
-          {data.map((entry, index) => (
-            <Cell key={`cell-${index}`} fill={index % 2 === 0 ? '#8884d8' : '#82ca9d'} />
-          ))}
-        </Pie>
-        <Tooltip />
-      </PieChart>
-    </ResponsiveContainer>
-  );
-
-  const renderBarChart = (data: any[]) => (
-    <ResponsiveContainer width="100%" height={300}>
-      <BarChart data={data}>
-        <CartesianGrid strokeDasharray="3 3" />
-        <XAxis dataKey="name" />
-        <YAxis />
-        <Tooltip />
-        <Legend />
-        <Bar dataKey="total" fill="#8884d8" />
-      </BarChart>
-    </ResponsiveContainer>
-  );
+  const pieChartData = upiSummary
+    .map(u => ({
+        name: u.UPI,
+        value: u.total_debited + u.total_credited,
+    }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, TOP_N_FOR_PIE);
 
   return (
-    <div className="container mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-4">UPI Transaction Analyzer</h1>
-      <div className="mb-4">
-        <input type="file" accept=".pdf" onChange={handleFileChange} />
-        <button
-          onClick={handleUpload}
-          className="ml-2 px-4 py-2 bg-blue-500 text-white rounded disabled:bg-gray-400"
-          disabled={loading || !file}
-        >
-          {loading ? 'Processing...' : 'Upload PDF'}
-        </button>
-      </div>
-      {error && <p className="text-red-500">{error}</p>}
-      {transactions.length > 0 && (
-        <div>
-          <h2 className="text-xl font-semibold mb-2">Transactions</h2>
-          <table className="min-w-full table-auto border-collapse border border-gray-300 mb-4">
-            <thead>
-              <tr>
-                <th className="border border-gray-300 px-4 py-2">Date</th>
-                <th className="border border-gray-300 px-4 py-2">Particulars</th>
-                <th className="border border-gray-300 px-4 py-2">Withdrawal</th>
-                <th className="border border-gray-300 px-4 py-2">Deposit</th>
-              </tr>
-            </thead>
-            <tbody>
-              {transactions.map((transaction, index) => (
-                <tr
-                  key={index}
-                  onClick={() => handleTransactionClick(transaction)}
-                  className="cursor-pointer hover:bg-gray-100"
-                >
-                  <td className="border border-gray-300 px-4 py-2">{transaction.Date}</td>
-                  <td className="border border-gray-300 px-4 py-2">{transaction.Particulars}</td>
-                  <td className="border border-gray-300 px-4 py-2">{transaction.Withdrawal}</td>
-                  <td className="border border-gray-300 px-4 py-2">{transaction.Deposit}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+    <div className="bg-slate-50 dark:bg-gray-900 min-h-screen font-sans text-gray-800 dark:text-gray-200 transition-colors duration-300">
+      <style>{`
+        @keyframes fade-in { 0% { opacity: 0; } 100% { opacity: 1; } }
+        .animate-fade-in { animation: fade-in 0.3s ease-out forwards; }
+        @keyframes slide-up { 0% { transform: translateY(20px); opacity: 0; } 100% { transform: translateY(0); opacity: 1; } }
+        .animate-slide-up { animation: slide-up 0.4s ease-out forwards; }
+      `}</style>
+
+      <header className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm shadow-sm sticky top-0 z-40">
+        <div className="container mx-auto px-6 py-4 flex justify-between items-center">
+          <h1 className="text-2xl font-bold text-indigo-600 dark:text-indigo-400 flex items-center">
+            <Banknote className="mr-2" />ParsePoint
+          </h1>
+          <button onClick={() => setIsDarkMode(prev => !prev)} className="p-2 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors">
+            {isDarkMode ? <Sun size={20} /> : <Moon size={20} />}
+          </button>
         </div>
-      )}
-      {upiSummary.length > 0 && (
-        <div>
-          <h2 className="text-xl font-semibold mb-2">UPI Summary</h2>
-          <table className="min-w-full table-auto border-collapse border border-gray-300 mb-4">
-            <thead>
-              <tr>
-                <th className="border border-gray-300 px-4 py-2">UPI ID</th>
-                <th className="border border-gray-300 px-4 py-2">Total Debited</th>
-                <th className="border border-gray-300 px-4 py-2">Total Credited</th>
-              </tr>
-            </thead>
-            <tbody>
-              {upiSummary.map((summary, index) => (
-                <tr key={index}>
-                  <td className="border border-gray-300 px-4 py-2">{summary.UPI}</td>
-                  <td className="border border-gray-300 px-4 py-2">{summary.total_debited}</td>
-                  <td className="border border-gray-300 px-4 py-2">{summary.total_credited}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-      {selectedTransaction && (
-        <div className="fixed inset-0 flex items-center justify-center bg-gray-800 bg-opacity-50">
-          <div className="bg-white p-4 rounded shadow-lg w-96">
-            <h3 className="text-xl font-semibold mb-2">Transaction Details</h3>
-            <p><strong>Date:</strong> {selectedTransaction.Date}</p>
-            <p><strong>Particulars:</strong> {selectedTransaction.Particulars}</p>
-            <p><strong>Withdrawal:</strong> {selectedTransaction.Withdrawal}</p>
-            <p><strong>Deposit:</strong> {selectedTransaction.Deposit}</p>
-            <button
-              onClick={handleCloseModal}
-              className="mt-2 px-4 py-2 bg-gray-500 text-white rounded"
+      </header>
+
+      <main className="container mx-auto p-6">
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-md dark:border dark:border-gray-700 mb-8">
+            <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">Upload Your Bank Statement</h2>
+            <div 
+                className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-8 text-center cursor-pointer hover:border-indigo-500 hover:bg-indigo-50 dark:hover:border-indigo-400 dark:hover:bg-gray-700/50 transition-all"
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => { e.preventDefault(); handleFileChange(e.dataTransfer.files); }}
+                onClick={() => document.getElementById('fileInput')?.click()}
             >
-              Close
+                <input type="file" id="fileInput" accept=".pdf" onChange={(e) => handleFileChange(e.target.files)} className="hidden" />
+                <div className="flex flex-col items-center justify-center text-gray-500 dark:text-gray-400">
+                    <UploadCloud size={48} className="mb-2 text-gray-400" />
+                    {fileName ? (
+                        <p><span className="font-semibold text-indigo-600 dark:text-indigo-400">{fileName}</span> selected.</p>
+                    ) : (
+                        <p><span className="font-semibold text-indigo-600 dark:text-indigo-400">Click to upload</span> or drag and drop</p>
+                    )}
+                    <p className="text-xs mt-1">PDF file only</p>
+                </div>
+            </div>
+            {error && <p className="text-red-500 mt-2 text-sm">{error}</p>}
+            {/* FIXED: Restored button content and loading state */}
+            <button
+                onClick={handleUpload}
+                className="mt-4 w-full flex items-center justify-center px-4 py-3 bg-indigo-600 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                disabled={!file || loading}
+            >
+                {loading ? (
+                    <>
+                        <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Processing...
+                    </>
+                ) : "Analyze Statement"}
             </button>
-          </div>
         </div>
-      )}
-      {upiSummary.length > 0 && (
-        <div>
-          <h2 className="text-xl font-semibold mb-2">Charts</h2>
-          <div className="mb-4">
-            <h3 className="font-semibold">UPI Debits vs Credits</h3>
-            {renderPieChart(upiSummary.map((summary) => ({
-              name: summary.UPI,
-              value: summary.total_debited - summary.total_credited,
-            })))}
+
+        {loading && <p className="text-center text-gray-500 dark:text-gray-400">Analyzing your document...</p>}
+        
+        {upiSummary.length > 0 && overallTotals ? (
+          <div className="space-y-8 animate-fade-in">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <StatCard title="Total Credited" value={`₹${overallTotals.total_credited.toLocaleString()}`} icon={<ArrowUpCircle />} colorClass="text-green-500" />
+              <StatCard title="Total Debited" value={`₹${overallTotals.total_debited.toLocaleString()}`} icon={<ArrowDownCircle />} colorClass="text-red-500" />
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
+                <div className="lg:col-span-3 bg-white dark:bg-gray-800 p-6 rounded-xl shadow-md dark:border dark:border-gray-700">
+                    <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">UPI Breakdown</h2>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left">
+                            <thead className="border-b-2 border-gray-200 dark:border-gray-700">
+                            <tr>
+                                <th className="py-3 px-4 font-semibold text-sm text-gray-600 dark:text-gray-400">UPI ID</th>
+                                <th className="py-3 px-4 font-semibold text-sm text-gray-600 dark:text-gray-400 text-right">Debited</th>
+                                <th className="py-3 px-4 font-semibold text-sm text-gray-600 dark:text-gray-400 text-right">Credited</th>
+                            </tr>
+                            </thead>
+                            <tbody>
+                            {upiSummary.map((item, idx) => (
+                                <tr key={idx} className="border-b border-gray-100 dark:border-gray-700/50 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer" onClick={() => setSelectedUPI(item)}>
+                                    <td className="py-3 px-4 font-medium text-gray-700 dark:text-gray-300 break-all">{item.UPI}</td>
+                                    <td className="py-3 px-4 text-red-500 dark:text-red-400 text-right font-mono">₹{item.total_debited.toLocaleString()}</td>
+                                    <td className="py-3 px-4 text-green-500 dark:text-green-400 text-right font-mono">₹{item.total_credited.toLocaleString()}</td>
+                                </tr>
+                            ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div className="lg:col-span-2 space-y-8">
+                    <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-md dark:border dark:border-gray-700">
+                        <h3 className="font-semibold mb-4 text-gray-900 dark:text-white">Top 5 Contacts by Volume</h3>
+                        <ResponsiveContainer width="100%" height={250}>
+                        <PieChart>
+                            <Pie data={pieChartData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label>
+                                {pieChartData.map((_, idx) => <Cell key={`cell-${idx}`} fill={PIE_COLORS[idx % PIE_COLORS.length]} />)}
+                            </Pie>
+                            <Tooltip formatter={(value: number) => `₹${value.toLocaleString()}`} contentStyle={{ backgroundColor: isDarkMode ? '#1F2937' : '#FFFFFF', border: '1px solid #374151' }} itemStyle={{ color: isDarkMode ? '#E5E7EB' : '#1F2937' }}/>
+                        </PieChart>
+                        </ResponsiveContainer>
+                    </div>
+                    <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-md dark:border dark:border-gray-700">
+                        <h3 className="font-semibold mb-4 text-gray-900 dark:text-white">Overall Cash Flow</h3>
+                        <ResponsiveContainer width="100%" height={250}>
+                        <BarChart data={[{ name: 'Total', Debited: overallTotals.total_debited, Credited: overallTotals.total_credited }]} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? "#4B5563" : "#E5E7EB"} vertical={false} />
+                            <XAxis dataKey="name" tick={{ fill: isDarkMode ? '#D1D5DB' : '#374151' }} />
+                            <YAxis tickFormatter={(value) => `₹${Number(value)/1000}k`} tick={{ fill: isDarkMode ? '#D1D5DB' : '#374151' }} />
+                            <Tooltip formatter={(value: number) => `₹${value.toLocaleString()}`} contentStyle={{ backgroundColor: isDarkMode ? '#1F2937' : '#FFFFFF', border: '1px solid #374151' }} itemStyle={{ color: isDarkMode ? '#E5E7EB' : '#1F2937' }}/>
+                            <Legend wrapperStyle={{ color: isDarkMode ? '#D1D5DB' : '#374151' }} />
+                            <Bar dataKey="Debited" fill={BAR_COLORS.debited} name="Total Debited" />
+                            <Bar dataKey="Credited" fill={BAR_COLORS.credited} name="Total Credited" />
+                        </BarChart>
+                        </ResponsiveContainer>
+                    </div>
+                </div>
+            </div>
           </div>
-          <div>
-            <h3 className="font-semibold">Total Debited vs Credited</h3>
-            {renderBarChart([
-              { name: 'Debited', total: upiSummary.reduce((acc, curr) => acc + curr.total_debited, 0) },
-              { name: 'Credited', total: upiSummary.reduce((acc, curr) => acc + curr.total_credited, 0) },
-            ])}
+        ) : (
+          !loading && <div className="text-center py-16 text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 rounded-xl shadow-md dark:border dark:border-gray-700">
+            <h2 className="text-xl font-semibold mb-2 text-gray-900 dark:text-white">Welcome!</h2>
+            <p>Upload your UPI statement to see your personalized dashboard.</p>
           </div>
-        </div>
-      )}
+        )}
+      </main>
+
+      {selectedUPI && <TransactionModal upiItem={selectedUPI} onClose={() => setSelectedUPI(null)} />}
     </div>
   );
 };
