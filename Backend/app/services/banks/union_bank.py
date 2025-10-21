@@ -4,7 +4,7 @@ import pandas as pd
 from fastapi import UploadFile
 
 # Regex to extract UPI IDs (simplified, adjust if needed)
-UPI_REGEX = r"[a-zA-Z0-9.\-_]+@*"
+UPI_REGEX = r"[a-zA-Z0-9.\-_]+@[a-zA-Z]+"
 
 async def extract_upi_summary(file: UploadFile):
     rows = []
