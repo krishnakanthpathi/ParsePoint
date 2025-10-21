@@ -35,3 +35,6 @@
     ├── requirements.txt / pyproject.toml
     ├── README.md
     └── .env (optional)
+
+
+uvicorn app.main:app --reload
