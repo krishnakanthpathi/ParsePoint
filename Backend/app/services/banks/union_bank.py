@@ -2,21 +2,13 @@ import pdfplumber
 import re
 import pandas as pd
 from fastapi import UploadFile
+from app.utils.extract_rows import extract_rows_from_pdf
 
 # Regex to extract UPI IDs (simplified, adjust if needed)
 UPI_REGEX = r"[a-zA-Z0-9.\-_]+@[a-zA-Z]+"
 
 async def extract_upi_summary(file: UploadFile):
-    rows = []
-
-    with pdfplumber.open(file.file) as pdf:
-        for page in pdf.pages:
-            table = page.extract_table()
-            if table:
-                headers = [h.strip() for h in table[0]]
-                for row in table[1:]:
-                    row_dict = dict(zip(headers, row))
-                    rows.append(row_dict)
+    rows = extract_rows_from_pdf(file)
 
     if not rows:
         return {"error": "No tables found in PDF"}
